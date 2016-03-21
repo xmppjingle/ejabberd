@@ -38,6 +38,8 @@ before_script:
   - psql -U postgres -c "CREATE USER ejabberd_test WITH PASSWORD 'ejabberd_test';"
   - psql -U postgres -c "CREATE DATABASE ejabberd_test;"
   - psql -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE ejabberd_test TO ejabberd_test;"
+  - sudo /usr/sbin/riak-admin test
+  - tail -n 100000 /etc/riak/*
 
 script:
   - ./autogen.sh
@@ -48,7 +50,6 @@ script:
   - sed -i -e 's/ct:pal/ct:log/' test/suite.erl
   - ln -sf ../sql priv/
   - escript ./rebar skip_deps=true ct -v
-  - /usr/sbin/riak-admin test
   - grep -q 'TEST COMPLETE, \([[:digit:]]*\) ok, .* of \1 ' logs/raw.log
 
 after_script:
@@ -56,8 +57,7 @@ after_script:
 
 after_failure:
   - find logs -name ejabberd.log -exec cat '{}' ';'
-  - cat /etc/riak/*
-  - cat /var/log/riak/*.log
+  - tail -n 100000 /var/log/riak/*.log
 
 after_success:
   - coveralls-merge erlang.json
