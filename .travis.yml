@@ -38,6 +38,8 @@ before_script:
   - psql -U postgres -c "CREATE USER ejabberd_test WITH PASSWORD 'ejabberd_test';"
   - psql -U postgres -c "CREATE DATABASE ejabberd_test;"
   - psql -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE ejabberd_test TO ejabberd_test;"
+  - sleep 30
+  - sudo /usr/sbin/riak-admin services
   - sudo /usr/sbin/riak-admin test
   - tail -n 100000 /etc/riak/*
 
