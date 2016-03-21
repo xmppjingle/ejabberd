@@ -31,7 +31,7 @@ before_script:
   - mkdir "$PWD/ebin"
   - echo "[{riak_kv, [{add_paths, [\"$PWD/ebin/\"]}]}]." > advanced.config
   - sudo mv advanced.config /etc/riak/advanced.config
-  - sudo sed 's/^\(log.console.level = \).*/\1 debug/' /etc/riak/riak.conf > /etc/riak/riak.conf
+  # - sudo sed 's/^\(log.console.level = \).*/\1 debug/' /etc/riak/riak.conf > /etc/riak/riak.conf
   - sudo service riak restart
   - mysql -u root -e "CREATE USER 'ejabberd_test'@'localhost' IDENTIFIED BY 'ejabberd_test';"
   - mysql -u root -e "CREATE DATABASE ejabberd_test;"
@@ -41,7 +41,7 @@ before_script:
   - psql -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE ejabberd_test TO ejabberd_test;"
   - sudo /usr/sbin/riak-admin wait-for-service riak_kv 'riak@127.0.0.1'
   - sudo /usr/sbin/riak-admin test
-  - tail -n 100000 /etc/riak/*
+  # - tail -n 100000 /etc/riak/*
 
 script:
   - ./autogen.sh
@@ -59,6 +59,7 @@ after_script:
 
 after_failure:
   - find logs -name ejabberd.log -exec cat '{}' ';'
+  # Try checking Riak database logs
   - tail -n 100000 /var/log/riak/*.log
 
 after_success:
