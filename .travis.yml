@@ -55,6 +55,7 @@ after_script:
 
 after_failure:
   - find logs -name ejabberd.log -exec cat '{}' ';'
+  - cat /var/log/riak/*.log
 
 after_success:
   - coveralls-merge erlang.json
