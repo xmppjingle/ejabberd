@@ -31,7 +31,7 @@ before_script:
   - mkdir "$PWD/ebin"
   - echo "[{riak_kv, [{add_paths, [\"$PWD/ebin/\"]}]}]." > advanced.config
   - sudo mv advanced.config /etc/riak/advanced.config
-  - sudo sed 's/^\(log.console.level = \).*/\1 debug/' /etc/riak/riak.conf
+  - sudo sed 's/^\(log.console.level = \).*/\1 debug/' /etc/riak/riak.conf > /etc/riak/riak.conf
   - sudo service riak restart
   - mysql -u root -e "CREATE USER 'ejabberd_test'@'localhost' IDENTIFIED BY 'ejabberd_test';"
   - mysql -u root -e "CREATE DATABASE ejabberd_test;"
