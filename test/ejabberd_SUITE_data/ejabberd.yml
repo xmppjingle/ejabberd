@@ -417,6 +417,7 @@ listen:
     captcha: true
 loglevel: 4
 max_fsm_queue: 1000
+riak_pool_size: 2
 modules: 
   mod_adhoc: []
   mod_configure: []
