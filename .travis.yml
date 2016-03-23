@@ -28,7 +28,7 @@ install:
   - sudo apt-get -qq install libexpat1-dev libyaml-dev libpam0g-dev libsqlite3-dev
 
 before_script:
-  - ulimit -n 2048
+  - ulimit -n 15000
   - mkdir "$PWD/ebin"
   - echo "[{riak_kv, [{add_paths, [\"$PWD/ebin/\"]}]}]." > advanced.config
   - sudo mv advanced.config /etc/riak/advanced.config
