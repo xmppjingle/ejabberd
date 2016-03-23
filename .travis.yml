@@ -29,8 +29,8 @@ install:
 
 before_script:
   # Ulimit: See Travis-CI issue report: https://github.com/travis-ci/travis-ci/issues/3328
-  - sudo sh -c 'ulimit -n 65536'
-  - sudo sh -c 'echo "ulimit -n 65536" > /etc/default/riak'
+  - sudo sh -c 'ulimit -n 4096'
+  - sudo sh -c 'echo "ulimit -n 4096" > /etc/default/riak'
   - mkdir "$PWD/ebin"
   - echo "[{riak_kv, [{add_paths, [\"$PWD/ebin/\"]}]}]." > advanced.config
   - sudo mv advanced.config /etc/riak/advanced.config
