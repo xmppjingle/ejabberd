@@ -41,7 +41,8 @@ before_script:
   - psql -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE ejabberd_test TO ejabberd_test;"
   - sudo /usr/sbin/riak-admin wait-for-service riak_kv 'riak@127.0.0.1'
   - sudo /usr/sbin/riak-admin test
-  # - tail -n 100000 /etc/riak/*
+  - sudo /usr/sbin/riak-admin status
+  - tail -n 100000 /etc/riak/*
 
 script:
   - ./autogen.sh
@@ -52,12 +53,15 @@ script:
   - sed -i -e 's/ct:pal/ct:log/' test/suite.erl
   - ln -sf ../sql priv/
   - escript ./rebar skip_deps=true ct -v
-  - grep -q 'TEST COMPLETE, \([[:digit:]]*\) ok, .* of \1 ' logs/raw.log
+  #- grep -q 'TEST COMPLETE, \([[:digit:]]*\) ok, .* of \1 ' logs/raw.log
+  - grep -q 'TEST COMPLETE, \([[:digit:]]*\) ok, 0 failed' logs/raw.log
 
 after_script:
   - find logs -name suite.log -exec cat '{}' ';'
 
 after_failure:
+  # Try checking Riak database logs
+  - tail -n 100000 /var/log/riak/*.log
   - find logs -name ejabberd.log -exec cat '{}' ';'
   # Try checking Riak database logs
   - tail -n 100000 /var/log/riak/*.log
