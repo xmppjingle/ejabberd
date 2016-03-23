@@ -28,6 +28,7 @@ install:
   - sudo apt-get -qq install libexpat1-dev libyaml-dev libpam0g-dev libsqlite3-dev
 
 before_script:
+  - ulimit -n 2048
   - mkdir "$PWD/ebin"
   - echo "[{riak_kv, [{add_paths, [\"$PWD/ebin/\"]}]}]." > advanced.config
   - sudo mv advanced.config /etc/riak/advanced.config
@@ -43,8 +44,6 @@ before_script:
   - sudo /usr/sbin/riak-admin test
   - sudo /usr/sbin/riak-admin status
   - tail -n 100000 /etc/riak/*
-  - ulimit -n 2048
-
 
 script:
   - ./autogen.sh
