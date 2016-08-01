@@ -26,6 +26,7 @@ fi
 
 #clean compile and make the package
 rm -rf $INSTDIR
+. /opt/erl18.3/activate
 ./autogen.sh
 ./configure --prefix=/
 make clean
