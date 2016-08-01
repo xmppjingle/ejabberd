@@ -56,6 +56,7 @@
 
 -include("ejabberd_http.hrl").
 -include("ejabberd_web_admin.hrl").
+-include("ejabberd_oauth.hrl").
 
 -include("ejabberd_commands.hrl").
 
@@ -64,23 +65,18 @@
 %%   * Using the web form/api results in the token being generated in behalf of the user providing the user/pass
 %%   * Using the command line and oauth_issue_token command, the token is generated in behalf of ejabberd' sysadmin
 %%    (as it has access to ejabberd command line).
--record(oauth_token, {
-          token = {<<"">>, <<"">>} :: {binary(), binary()},
-          us = {<<"">>, <<"">>}    :: {binary(), binary()},
-          scope = []               :: [binary()],
-          expire                   :: integer()
-         }).
 
--define(EXPIRE, 3600).
+-define(EXPIRE, 31536000).
 
 start() ->
-    init_db(mnesia, ?MYNAME),
+    DBMod = get_db_backend(),
+    DBMod:init(),
     Expire = expire(),
     application:set_env(oauth2, backend, ejabberd_oauth),
     application:set_env(oauth2, expiry_time, Expire),
     application:start(oauth2),
     ChildSpec = {?MODULE, {?MODULE, start_link, []},
-		 temporary, 1000, worker, [?MODULE]},
+		 transient, 1000, worker, [?MODULE]},
     supervisor:start_child(ejabberd_sup, ChildSpec),
     ejabberd_commands:register_commands(get_commands_spec()),
     ok.
@@ -172,15 +168,8 @@ handle_cast(_Msg, State) -> {noreply, State}.
 handle_info(clean, State) ->
     {MegaSecs, Secs, MiniSecs} = os:timestamp(),
     TS = 1000000 * MegaSecs + Secs,
-    F = fun() ->
-		Ts = mnesia:select(
-		       oauth_token,
-		       [{#oauth_token{expire = '$1', _ = '_'},
-			 [{'<', '$1', TS}],
-			 ['$_']}]),
-		lists:foreach(fun mnesia:delete_object/1, Ts)
-        end,
-    mnesia:async_dirty(F),
+    DBMod = get_db_backend(),
+    DBMod:clean(TS),
     erlang:send_after(trunc(expire() * 1000 * (1 + MiniSecs / 1000000)),
                       self(), clean),
     {noreply, State};
@@ -189,16 +178,6 @@ handle_info(_Info, State) -> {noreply, State}.
 terminate(_Reason, _State) -> ok.
 
 code_change(_OldVsn, State, _Extra) -> {ok, State}.
-
-
-init_db(mnesia, _Host) ->
-    mnesia:create_table(oauth_token,
-                        [{disc_copies, [node()]},
-                         {attributes,
-                          record_info(fields, oauth_token)}]),
-    mnesia:add_table_copy(oauth_token, node(), disc_copies);
-init_db(_, _) ->
-    ok.
 
 
 get_client_identity(Client, Ctx) -> {ok, {Ctx, {client, Client}}}.
@@ -236,7 +215,7 @@ authenticate_user({User, Server}, Ctx) ->
 authenticate_client(Client, Ctx) -> {ok, {Ctx, {client, Client}}}.
 
 verify_resowner_scope({user, _User, _Server}, Scope, Ctx) ->
-    Cmds = ejabberd_commands:get_commands(),
+    Cmds = ejabberd_commands:get_exposed_commands(),
     Cmds1 = ['ejabberd:user', 'ejabberd:admin', sasl_auth | Cmds],
     RegisteredScope = [atom_to_binary(C, utf8) || C <- Cmds1],
     case oauth2_priv_set:is_subset(oauth2_priv_set:new(Scope),
@@ -258,7 +237,7 @@ get_cmd_scopes() ->
                                                     dict:append(Scope, Cmd, Accum2)
                                             end, Accum, Scopes);
                             _ -> Accum
-                        end end, dict:new(), ejabberd_commands:get_commands()),
+                        end end, dict:new(), ejabberd_commands:get_exposed_commands()),
     ScopeMap.
 
 %% This is callback for oauth tokens generated through the command line.  Only open and admin commands are
@@ -305,7 +284,8 @@ associate_access_token(AccessToken, Context, AppContext) ->
       scope = Scope,
       expire = Expire
      },
-    mnesia:dirty_write(R),
+    DBMod = get_db_backend(),
+    DBMod:store(R),
     {ok, AppContext}.
 
 associate_refresh_token(_RefreshToken, _Context, AppContext) ->
@@ -315,36 +295,48 @@ associate_refresh_token(_RefreshToken, _Context, AppContext) ->
 check_token(User, Server, ScopeList, Token) ->
     LUser = jid:nodeprep(User),
     LServer = jid:nameprep(Server),
-    case catch mnesia:dirty_read(oauth_token, Token) of
-        [#oauth_token{us = {LUser, LServer},
-                      scope = TokenScope,
-                      expire = Expire}] ->
+    DBMod = get_db_backend(),
+    case DBMod:lookup(Token) of
+        #oauth_token{us = {LUser, LServer},
+                     scope = TokenScope,
+                     expire = Expire} ->
             {MegaSecs, Secs, _} = os:timestamp(),
             TS = 1000000 * MegaSecs + Secs,
-            TokenScopeSet = oauth2_priv_set:new(TokenScope),
-            lists:any(fun(Scope) ->
-                oauth2_priv_set:is_member(Scope, TokenScopeSet) end,
-                ScopeList) andalso Expire > TS;
+            if
+                Expire > TS ->
+                    TokenScopeSet = oauth2_priv_set:new(TokenScope),
+                    lists:any(fun(Scope) ->
+                                      oauth2_priv_set:is_member(Scope, TokenScopeSet) end,
+                              ScopeList);
+                true ->
+                    {false, expired}
+            end;
         _ ->
-            false
+            {false, not_found}
     end.
 
 check_token(ScopeList, Token) ->
-    case catch mnesia:dirty_read(oauth_token, Token) of
-        [#oauth_token{us = US,
-                      scope = TokenScope,
-                      expire = Expire}] ->
+    DBMod = get_db_backend(),
+    case DBMod:lookup(Token) of
+        #oauth_token{us = US,
+                     scope = TokenScope,
+                     expire = Expire} ->
             {MegaSecs, Secs, _} = os:timestamp(),
             TS = 1000000 * MegaSecs + Secs,
-            TokenScopeSet = oauth2_priv_set:new(TokenScope),
-            case lists:any(fun(Scope) ->
-                oauth2_priv_set:is_member(Scope, TokenScopeSet) end,
-                ScopeList) andalso Expire > TS of
-                true -> {ok, user, US};
-                false -> false
+            if
+                Expire > TS ->
+                    TokenScopeSet = oauth2_priv_set:new(TokenScope),
+                    case lists:any(fun(Scope) ->
+                                           oauth2_priv_set:is_member(Scope, TokenScopeSet) end,
+                                   ScopeList) of
+                        true -> {ok, user, US};
+                        false -> {false, no_matching_scope}
+                    end;
+                true ->
+                    {false, expired}
             end;
         _ ->
-            false
+            {false, not_found}
     end.
 
 
@@ -375,11 +367,8 @@ process(_Handlers,
         ?XAE(<<"form">>,
              [{<<"action">>, <<"authorization_token">>},
               {<<"method">>, <<"post">>}],
-             [?LABEL(<<"username">>, [?CT(<<"User">>), ?C(<<": ">>)]),
+             [?LABEL(<<"username">>, [?CT(<<"User (jid)">>), ?C(<<": ">>)]),
               ?INPUTID(<<"text">>, <<"username">>, <<"">>),
-              ?BR,
-              ?LABEL(<<"server">>, [?CT(<<"Server">>), ?C(<<": ">>)]),
-              ?INPUTID(<<"text">>, <<"server">>, <<"">>),
               ?BR,
               ?LABEL(<<"password">>, [?CT(<<"Password">>), ?C(<<": ">>)]),
               ?INPUTID(<<"password">>, <<"password">>, <<"">>),
@@ -392,12 +381,10 @@ process(_Handlers,
               ?LABEL(<<"ttl">>, [?CT(<<"Token TTL">>), ?CT(<<": ">>)]),
               ?XAE(<<"select">>, [{<<"name">>, <<"ttl">>}],
                    [
-                   ?XAC(<<"option">>, [{<<"selected">>, <<"selected">>},
-                                       {<<"value">>, jlib:integer_to_binary(expire())}],<<"Default (", (integer_to_binary(expire()))/binary, " seconds)">>),
                    ?XAC(<<"option">>, [{<<"value">>, <<"3600">>}],<<"1 Hour">>),
                    ?XAC(<<"option">>, [{<<"value">>, <<"86400">>}],<<"1 Day">>),
                    ?XAC(<<"option">>, [{<<"value">>, <<"2592000">>}],<<"1 Month">>),
-                   ?XAC(<<"option">>, [{<<"value">>, <<"31536000">>}],<<"1 Year">>),
+                   ?XAC(<<"option">>, [{<<"selected">>, <<"selected">>},{<<"value">>, <<"31536000">>}],<<"1 Year">>),
                    ?XAC(<<"option">>, [{<<"value">>, <<"315360000">>}],<<"10 Years">>)]),
               ?BR,
               ?INPUTT(<<"submit">>, <<"">>, <<"Accept">>)
@@ -443,8 +430,8 @@ process(_Handlers,
     ClientId = proplists:get_value(<<"client_id">>, Q, <<"">>),
     RedirectURI = proplists:get_value(<<"redirect_uri">>, Q, <<"">>),
     SScope = proplists:get_value(<<"scope">>, Q, <<"">>),
-    Username = proplists:get_value(<<"username">>, Q, <<"">>),
-    Server = proplists:get_value(<<"server">>, Q, <<"">>),
+    StringJID = proplists:get_value(<<"username">>, Q, <<"">>),
+    #jid{user = Username, server = Server} = jid:from_string(StringJID),
     Password = proplists:get_value(<<"password">>, Q, <<"">>),
     State = proplists:get_value(<<"state">>, Q, <<"">>),
     Scope = str:tokens(SScope, <<" ">>),
@@ -500,11 +487,82 @@ process(_Handlers,
                    }],
              ejabberd_web:make_xhtml([?XC(<<"h1">>, <<"302 Found">>)])}
     end;
+process(_Handlers,
+	#request{method = 'POST', q = Q, lang = _Lang,
+		 path = [_, <<"token">>]}) ->
+    case proplists:get_value(<<"grant_type">>, Q, <<"">>) of
+      <<"password">> ->
+        SScope = proplists:get_value(<<"scope">>, Q, <<"">>),
+        StringJID = proplists:get_value(<<"username">>, Q, <<"">>),
+        #jid{user = Username, server = Server} = jid:from_string(StringJID),
+        Password = proplists:get_value(<<"password">>, Q, <<"">>),
+        Scope = str:tokens(SScope, <<" ">>),
+        TTL = proplists:get_value(<<"ttl">>, Q, <<"">>),
+        ExpiresIn = case TTL of
+                        <<>> -> undefined;
+                        _ -> jlib:binary_to_integer(TTL)
+                    end,
+        case oauth2:authorize_password({Username, Server},
+                                       Scope,
+                                       {password, Password}) of
+            {ok, {_AppContext, Authorization}} ->
+                {ok, {_AppContext2, Response}} =
+                    oauth2:issue_token(Authorization, [{expiry_time, ExpiresIn} || ExpiresIn /= undefined ]),
+                {ok, AccessToken} = oauth2_response:access_token(Response),
+                {ok, Type} = oauth2_response:token_type(Response),
+                %%Ugly: workardound to return the correct expirity time, given than oauth2 lib doesn't really have
+                %%per-case expirity time.
+                Expires = case ExpiresIn of
+                              undefined ->
+                                 {ok, Ex} = oauth2_response:expires_in(Response),
+                                 Ex;
+                              _ ->
+                                ExpiresIn
+                          end,
+                {ok, VerifiedScope} = oauth2_response:scope(Response),
+                json_response(200, {[
+                   {<<"access_token">>, AccessToken},
+                   {<<"token_type">>, Type},
+                   {<<"scope">>, str:join(VerifiedScope, <<" ">>)},
+                   {<<"expires_in">>, Expires}]});
+            {error, Error} when is_atom(Error) ->
+                json_error(400, <<"invalid_grant">>, Error)
+        end;
+        _OtherGrantType ->
+            json_error(400, <<"unsupported_grant_type">>, unsupported_grant_type)
+  end;
+
 process(_Handlers, _Request) ->
     ejabberd_web:error(not_found).
 
+-spec get_db_backend() -> module().
+
+get_db_backend() ->
+    DBType = ejabberd_config:get_option(
+               oauth_db_type,
+               fun(T) -> ejabberd_config:v_db(?MODULE, T) end,
+               mnesia),
+    list_to_atom("ejabberd_oauth_" ++ atom_to_list(DBType)).
 
 
+%% Headers as per RFC 6749
+json_response(Code, Body) ->
+    {Code, [{<<"Content-Type">>, <<"application/json;charset=UTF-8">>},
+           {<<"Cache-Control">>, <<"no-store">>},
+           {<<"Pragma">>, <<"no-cache">>}],
+     jiffy:encode(Body)}.
+
+%% OAauth error are defined in:
+%% https://tools.ietf.org/html/draft-ietf-oauth-v2-25#section-5.2
+json_error(Code, Error, Reason) ->
+    Desc = json_error_desc(Reason),
+    Body = {[{<<"error">>, Error},
+             {<<"error_description">>, Desc}]},
+    json_response(Code, Body).
+
+json_error_desc(access_denied)          -> <<"Access denied">>;
+json_error_desc(unsupported_grant_type) -> <<"Unsupported grant type">>;
+json_error_desc(invalid_scope)          -> <<"Invalid scope">>.
 
 web_head() ->
     [?XA(<<"meta">>, [{<<"http-equiv">>, <<"X-UA-Compatible">>},
@@ -618,7 +676,7 @@ css() ->
             text-decoration: underline;
           }
 
-      .container > .section { 
+      .container > .section {
           background: #424A55;
       }
 
@@ -636,4 +694,6 @@ opt_type(oauth_expire) ->
     fun(I) when is_integer(I), I >= 0 -> I end;
 opt_type(oauth_access) ->
     fun acl:access_rules_validator/1;
-opt_type(_) -> [oauth_expire, oauth_access].
+opt_type(oauth_db_type) ->
+    fun(T) -> ejabberd_config:v_db(?MODULE, T) end;
+opt_type(_) -> [oauth_expire, oauth_access, oauth_db_type].

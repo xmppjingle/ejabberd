@@ -1632,11 +1632,18 @@ handle_info({route, From, To,
                                                    <<"groupchat">> -> ok;
                                                    <<"headline">> -> ok;
                                                    _ ->
-                                                       Err =
-                                                           jlib:make_error_reply(Packet,
-                                                                                 ?ERR_SERVICE_UNAVAILABLE),
-                                                       ejabberd_router:route(To, From,
-                                                                             Err)
+						       case fxml:get_subtag_with_xmlns(Packet,
+										       <<"x">>,
+										       ?NS_MUC_USER)
+							   of
+							 false ->
+							     Err =
+								 jlib:make_error_reply(Packet,
+										       ?ERR_SERVICE_UNAVAILABLE),
+							     ejabberd_router:route(To, From,
+										   Err);
+							 _ -> ok
+						       end
                                                end,
                                                {false, Attrs, StateData}
 				       end;
@@ -1855,6 +1862,7 @@ send_text(StateData, Text) ->
 send_element(StateData, El) when StateData#state.mgmt_state == pending ->
     ?DEBUG("Cannot send element while waiting for resumption: ~p", [El]);
 send_element(StateData, El) when StateData#state.xml_socket ->
+    ?DEBUG("Send XML on stream = ~p", [fxml:element_to_binary(El)]),
     (StateData#state.sockmod):send_xml(StateData#state.socket,
 				       {xmlstreamelement, El});
 send_element(StateData, El) ->
@@ -2951,6 +2959,9 @@ handle_unacked_stanzas(#state{mgmt_state = MgmtState} = StateData)
 						   [StateData, From,
 						    StateData#state.jid, El]) of
 			true ->
+			    ?DEBUG("Dropping archived message stanza from ~s",
+				   [fxml:get_attr_s(<<"from">>,
+						    El#xmlel.attrs)]),
 			    ok;
 			false ->
 			    ReRoute(From, To, El, Time)
