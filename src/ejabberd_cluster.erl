@@ -69,7 +69,7 @@ join(Node) ->
                 lists:foreach(fun(Table) ->
                             Type = call(Node, mnesia, table_info, [Table, storage_type]),
                             mnesia:add_table_copy(Table, node(), Type)
-                    end, mnesia:system_info(tables)--[schema])
+                    end, mnesia:system_info(tables)--[schema, ejabberd_commands])
                 end),
             application:start(ejabberd);
         _ ->
