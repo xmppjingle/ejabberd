@@ -2800,8 +2800,7 @@ handle_resume(StateData, Attrs) ->
 		       #xmlel{name = <<"r">>,
 			      attrs = [{<<"xmlns">>, AttrXmlns}],
 			      children = []}),
-	  FlushedState = csi_flush_queue(NewState),
-	  NewStateData = FlushedState#state{csi_state = active},
+	  NewStateData = csi_flush_queue(NewState),
 	  ?INFO_MSG("Resumed session for ~s",
 		    [jid:to_string(NewStateData#state.jid)]),
 	  {ok, NewStateData};
@@ -3048,13 +3047,13 @@ inherit_session_state(#state{user = U, server = S} = StateData, ResumeID) ->
 					   pres_timestamp = OldStateData#state.pres_timestamp,
 					   privacy_list = OldStateData#state.privacy_list,
 					   aux_fields = OldStateData#state.aux_fields,
-					   csi_state = OldStateData#state.csi_state,
 					   mgmt_xmlns = OldStateData#state.mgmt_xmlns,
 					   mgmt_queue = OldStateData#state.mgmt_queue,
 					   mgmt_timeout = OldStateData#state.mgmt_timeout,
 					   mgmt_stanzas_in = OldStateData#state.mgmt_stanzas_in,
 					   mgmt_stanzas_out = OldStateData#state.mgmt_stanzas_out,
-					   mgmt_state = active}};
+					   mgmt_state = active,
+					   csi_state = active}};
 		  {error, Msg} ->
 		      {error, Msg};
 		  _ ->
@@ -3081,20 +3080,22 @@ add_resent_delay_info(#state{server = From}, El, Time) ->
 %%% XEP-0352
 %%%----------------------------------------------------------------------
 
-csi_filter_stanza(#state{csi_state = CsiState, server = Server} = StateData,
-		  Stanza) ->
+csi_filter_stanza(#state{csi_state = CsiState, jid = JID, server = Server} =
+		  StateData, Stanza) ->
     {StateData1, Stanzas} = ejabberd_hooks:run_fold(csi_filter_stanza, Server,
 						    {StateData, [Stanza]},
-						    [Server, Stanza]),
+						    [Server, JID, Stanza]),
     StateData2 = lists:foldl(fun(CurStanza, AccState) ->
 				     send_stanza(AccState, CurStanza)
 			     end, StateData1#state{csi_state = active},
 			     Stanzas),
     StateData2#state{csi_state = CsiState}.
 
-csi_flush_queue(#state{csi_state = CsiState, server = Server} = StateData) ->
+csi_flush_queue(#state{csi_state = CsiState, jid = JID, server = Server} =
+		StateData) ->
     {StateData1, Stanzas} = ejabberd_hooks:run_fold(csi_flush_queue, Server,
-						    {StateData, []}, [Server]),
+						    {StateData, []},
+						    [Server, JID]),
     StateData2 = lists:foldl(fun(CurStanza, AccState) ->
 				     send_stanza(AccState, CurStanza)
 			     end, StateData1#state{csi_state = active},
