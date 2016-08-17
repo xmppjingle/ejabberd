@@ -31,6 +31,8 @@
 
 -behaviour(cyrsasl).
 
+-include("logger.hrl").
+
 -record(state, {check_password}).
 
 start(_Opts) ->
