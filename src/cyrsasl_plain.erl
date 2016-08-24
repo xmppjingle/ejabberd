@@ -46,7 +46,7 @@ mech_new(_Host, _GetPassword, CheckPassword, _CheckPasswordDigest) ->
     {ok, #state{check_password = CheckPassword}}.
 
 mech_step(State, ClientIn) ->
-    ?DEBUG("PLAIN STEP: ~p ~p ~p ~p ~n", [State, ClientIn]),
+    ?DEBUG("PLAIN STEP: ~p ~p ~n", [State, ClientIn]),
     case prepare(ClientIn) of
       [AuthzId, User, Password] ->
 	  case (State#state.check_password)(User, AuthzId, Password) of
