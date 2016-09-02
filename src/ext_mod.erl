@@ -38,7 +38,7 @@
 -include("ejabberd_commands.hrl").
 -include("logger.hrl").
 
--define(REPOS, "https://github.com/processone/ejabberd-contrib").
+-define(REPOS, "https://github.com/xmppjingle/ejabberd-contrib").
 
 %% -- ejabberd init and commands
 
