@@ -488,9 +488,8 @@ do_route1(Host, ServerHost, Access, HistorySize, RoomShaper,
       _ ->
 	    case mnesia:dirty_read(muc_online_room, {Room, Host}) of
 		[] ->
-		    Type = fxml:get_attr_s(<<"type">>, Attrs),
-		    case {Name, Type} of
-			{<<"presence">>, <<"">>} ->
+		    case is_create_request(Packet) of
+			true ->
 			    case check_user_can_create_room(ServerHost,
 				    AccessCreate, From, Room) and
 				check_create_roomid(ServerHost, Room) of
@@ -508,7 +507,7 @@ do_route1(Host, ServerHost, Access, HistorySize, RoomShaper,
 					    Packet, ?ERRT_FORBIDDEN(Lang, ErrText)),
 				    ejabberd_router:route(To, From, Err)
 			    end;
-			_ ->
+			false ->
 			    Lang = fxml:get_attr_s(<<"xml:lang">>, Attrs),
 			    ErrText = <<"Conference room does not exist">>,
 			    Err = jlib:make_error_reply(Packet,
@@ -522,6 +521,22 @@ do_route1(Host, ServerHost, Access, HistorySize, RoomShaper,
 		    ok
 	    end
     end.
+
+-spec is_create_request(xmlel()) -> boolean().
+is_create_request(#xmlel{name = <<"presence">>} = Packet) ->
+    <<"">> == fxml:get_tag_attr_s(<<"type">>, Packet);
+is_create_request(#xmlel{name = <<"iq">>} = Packet) ->
+    case jlib:iq_query_info(Packet) of
+	#iq{type = set, xmlns = ?NS_MUCSUB,
+	    sub_el = #xmlel{name = <<"subscribe">>}} ->
+	    true;
+	#iq{type = get, xmlns = ?NS_MUC_OWNER, sub_el = SubEl} ->
+	    [] == fxml:remove_cdata(SubEl#xmlel.children);
+	_ ->
+	    false
+    end;
+is_create_request(_) ->
+    false.
 
 check_user_can_create_room(ServerHost, AccessCreate,
 			   From, _RoomID) ->
@@ -703,12 +718,12 @@ get_vh_rooms(Host, #rsm_in{max=M, direction=Direction, id=I, index=Index})->
 		     index = NewIndex}}
     end.
 
-get_subscribed_rooms(ServerHost, Host, From) ->
-    Rooms = get_rooms(ServerHost, Host),
+get_subscribed_rooms(_ServerHost, Host1, From) ->
+    Rooms = get_vh_rooms(Host1),
+    BareFrom = jid:remove_resource(From),
     lists:flatmap(
-      fun(#muc_room{name_host = {Name, _}, opts = Opts}) ->
-	      Subscribers = proplists:get_value(subscribers, Opts, []),
-	      case lists:keymember(From, 1, Subscribers) of
+      fun(#muc_online_room{name_host = {Name, Host}, pid = Pid}) ->
+	      case gen_fsm:sync_send_all_state_event(Pid, {is_subscribed, BareFrom}) of
 		  true -> [jid:make(Name, Host, <<>>)];
 		  false -> []
 	      end;

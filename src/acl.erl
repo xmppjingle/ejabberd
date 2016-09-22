@@ -75,12 +75,6 @@
 -export_type([acl/0]).
 
 start() ->
-    case catch mnesia:table_info(acl, storage_type) of
-        disc_copies ->
-            mnesia:delete_table(acl);
-        _ ->
-            ok
-    end,
     mnesia:create_table(acl,
 			[{ram_copies, [node()]}, {type, bag},
                          {local_content, true},
@@ -262,6 +256,7 @@ normalize_spec(Spec) ->
         {server, S} -> {server, nameprep(S)};
         {resource, R} -> {resource, resourceprep(R)};
         {server_regexp, SR} -> {server_regexp, b(SR)};
+        {resource_regexp, R} -> {resource_regexp, b(R)};
         {server_glob, S} -> {server_glob, b(S)};
         {resource_glob, R} -> {resource_glob, b(R)};
         {ip, {Net, Mask}} -> {ip, {Net, Mask}};
@@ -448,9 +443,9 @@ access_matches(all, _Data, _Host) ->
 access_matches(none, _Data, _Host) ->
     deny;
 access_matches(Name, Data, Host) when is_atom(Name) ->
-    GAccess = ets:lookup(access, {Name, global}),
+    GAccess = mnesia:dirty_read(access, {Name, global}),
     LAccess =
-	if Host /= global -> ets:lookup(access, {Name, Host});
+	if Host /= global -> mnesia:dirty_read(access, {Name, Host});
 	    true -> []
 	end,
     case GAccess ++ LAccess of
@@ -483,7 +478,7 @@ access_rules_matches([], _Data, _Host, Default) ->
     Default.
 
 get_aclspecs(ACL, Host) ->
-    ets:lookup(acl, {ACL, Host}) ++ ets:lookup(acl, {ACL, global}).
+    mnesia:dirty_read(acl, {ACL, Host}) ++ mnesia:dirty_read(acl, {ACL, global}).
 
 is_regexp_match(String, RegExp) ->
     case ejabberd_regexp:run(String, RegExp) of
@@ -686,7 +681,8 @@ transform_options({acl, Name, Type}, Opts) ->
             {server_regexp, SR} -> {server_regexp, [b(SR)]};
             {server_glob, S} -> {server_glob, [b(S)]};
             {ip, S} -> {ip, [b(S)]};
-            {resource_glob, R} -> {resource_glob, [b(R)]}
+            {resource_glob, R} -> {resource_glob, [b(R)]};
+            {resource_regexp, R} -> {resource_regexp, [b(R)]}
         end,
     [{acl, [{Name, [T]}]}|Opts];
 transform_options({access, Name, Rules}, Opts) ->
